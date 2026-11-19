@@ -1,0 +1,32 @@
+{
+  "irpf_indicador_renta": {
+    "title": "Indicador de Renta Disponible Bruta Municipal. Municipios",
+    "license": "Creative Commons Attribution",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.es",
+    "url": "https://datos.comunidad.madrid/dataset/1715068e-0527-4632-aba1-37da355b346f/resource/fc9d4336-3c4a-4dd3-8f8f-dac0a4e29033/download/indicador-de-renta-disponible-bruta-municipal.-municipios.csv"
+  },
+  "grado_envejecimiento_por_edad": {
+    "title": "Grado de envejecimiento por grupo de edad (porcentaje). Municipios",
+    "license": "Creative Commons Attribution",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.es",
+    "url": "https://datos.comunidad.madrid/dataset/35bf8213-919c-406a-b1dc-1806fe950bc1/resource/37517751-7beb-448e-82b1-b19f74008e4c/download/grado-de-envejecimiento-por-grupo-de-edad-porcentaje.-municipios.csv"
+  },
+  "centros_sanitarios_por_tipo": {
+    "title": "Recursos y asistencia sanitaria. Centros por tipo de centro. Municipios",
+    "license": "Creative Commons Attribution",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.es",
+    "url": "https://datos.comunidad.madrid/dataset/6dc2b24b-ebfd-4ad6-bde0-eb4edca6f860/resource/631ebd15-c19f-4984-9ad5-bb4b8554b5e0/download/recursos-y-asistencia-sanitaria.-centros-por-tipo-de-centro.-municipios.csv"
+  },
+  "302038": {
+    "title": "Total paro registrado. Municipios",
+    "license": "Creative Commons Attribution",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.es",
+    "url": "https://datos.comunidad.madrid/dataset/4190d0f7-b832-4521-a3cb-854395309bcd/resource/4fe02826-b3c2-428b-ad5d-9243c2e49718/download/total-paro-registrado.-municipios.csv"
+  },
+  "padron_por_sexo": {
+    "title": "Población empadronada por sexo. Municipios",
+    "license": "Creative Commons Attribution",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.es",
+    "url": "https://datos.comunidad.madrid/dataset/bf0b4159-21f8-42fa-835c-d0dc6bc5fadf/resource/bc69f395-1f96-4fc2-a115-025c55b905ad/download/poblacion-empadronada-por-sexo.-municipios.csv"
+  }
+}

@@ -1,86 +1,97 @@
-"""Acceso de solo lectura al catálogo CKAN de la Comunidad de Madrid."""
-from __future__ import annotations
+"""Cliente del catálogo CKAN y descarga restringida de recursos oficiales."""
+from time import monotonic
+from urllib.parse import urljoin, urlparse
 
-from urllib.parse import urlparse
-import io
-import json
-
-import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from data_tables import describe_table, read_table
+
+__all__ = ["catalog_page", "compatible_resources", "describe_table", "download_table", "search_catalog"]
 
 API_ROOT = "https://datos.comunidad.madrid/api/3/action"
 MAX_BYTES = 15 * 1024 * 1024
-USER_AGENT = "MadridDataExplorer/0.1 (academic open-data prototype)"
+FORMATS = {"CSV", "TSV", "JSON", "XLSX", "XLS"}
+SORT = {"Relevancia": "score desc, metadata_modified desc",
+        "Actualización": "metadata_modified desc", "Título": "title_string asc"}
+FACETS = {"Tema": "groups", "Organismo": "organization", "Formato": "res_format", "Etiqueta": "tags"}
 
 
-def search_catalog(query: str, rows: int = 25) -> tuple[int, list[dict]]:
-    response = requests.get(
-        f"{API_ROOT}/package_search",
-        params={"q": query.strip(), "rows": min(rows, 100)},
-        headers={"User-Agent": USER_AGENT}, timeout=25,
-    )
-    response.raise_for_status()
-    payload = response.json()
+def _session():
+    session = requests.Session()
+    session.headers["User-Agent"] = "MadridDataExplorer/1.0"
+    session.mount("https://", HTTPAdapter(max_retries=Retry(
+        total=1, status_forcelist=[429, 500, 502, 503, 504], backoff_factor=0.2,
+        respect_retry_after_header=False,
+    )))
+    return session
+
+
+def catalog_page(query, rows=20, start=0, filters=None, sort="Relevancia"):
+    clauses = []
+    for label, value in (filters or {}).items():
+        if value and label in FACETS:
+            escaped = str(value).replace(chr(92), chr(92)*2).replace('"', chr(92)+'"')
+            clauses.append(f'{FACETS[label]}:"{escaped}"')
+    with _session() as session:
+        response = session.get(f"{API_ROOT}/package_search", params={
+            "q": query.strip(), "rows": min(max(rows, 1), 100), "start": max(start, 0),
+            "fq": " ".join(clauses), "sort": SORT[sort], "facet.field": '["groups","organization","res_format","tags"]',
+            "facet.limit": 40,
+        }, timeout=(4, 12))
+        response.raise_for_status()
+        payload = response.json()
     if not payload.get("success"):
         raise ValueError("La API del catálogo devolvió un error.")
-    result = payload["result"]
+    return payload["result"]
+
+
+def search_catalog(query, rows=25):
+    result = catalog_page(query, rows)
     return result["count"], result["results"]
 
 
-def compatible_resources(dataset: dict) -> list[dict]:
+def official_url(url):
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        return (parsed.scheme == "https" and parsed.port in {None, 443}
+                and parsed.username is None and parsed.password is None
+                and any(host == domain or host.endswith("." + domain)
+                        for domain in ("comunidad.madrid", "madrid.org")))
+    except ValueError:
+        return False
+
+
+def compatible_resources(dataset):
     return [r for r in dataset.get("resources", [])
-            if str(r.get("format", "")).upper() in {"CSV", "JSON", "XLSX", "XLS"}
-            and str(r.get("url", "")).startswith("https://")]
+            if str(r.get("format", "")).strip().upper() in FORMATS
+            and official_url(str(r.get("url", "")))]
 
 
-def download_table(resource: dict) -> pd.DataFrame:
+def download_table(resource):
     url = str(resource.get("url", ""))
-    parsed = urlparse(url)
-    # Avoid downloading arbitrary internal addresses from catalog metadata.
-    if parsed.scheme != "https" or not parsed.hostname or not (
-        parsed.hostname == "comunidad.madrid"
-        or parsed.hostname.endswith(".comunidad.madrid")
-        or parsed.hostname == "madrid.org"
-        or parsed.hostname.endswith(".madrid.org")
-    ):
-        raise ValueError("El recurso está alojado fuera de los dominios oficiales permitidos.")
-
-    with requests.get(url, headers={"User-Agent": USER_AGENT},
-                      timeout=45, stream=True, allow_redirects=False) as response:
-        response.raise_for_status()
-        data = bytearray()
-        for chunk in response.iter_content(chunk_size=65536):
-            data.extend(chunk)
-            if len(data) > MAX_BYTES:
-                raise ValueError("El fichero supera 15 MB. Elige otro recurso.")
-    raw = bytes(data)
-    fmt = str(resource.get("format", "")).upper()
-    if fmt == "CSV":
-        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
-            try:
-                return pd.read_csv(io.BytesIO(raw), sep=None, engine="python", encoding=encoding,
-                                   on_bad_lines="skip")
-            except (UnicodeError, pd.errors.ParserError, ValueError):
-                continue
-        raise ValueError("No se pudo interpretar el CSV.")
-    if fmt in {"XLS", "XLSX"}:
-        return pd.read_excel(io.BytesIO(raw))
-    if fmt == "JSON":
-        payload = json.loads(raw)
-        if isinstance(payload, dict):
-            for key in ("data", "results", "result", "records", "features"):
-                if isinstance(payload.get(key), list):
-                    payload = payload[key]
-                    break
-        if not isinstance(payload, list):
-            raise ValueError("El JSON no contiene una lista de registros tabulares.")
-        return pd.json_normalize(payload)
-    raise ValueError("Formato no soportado.")
-
-
-def describe_table(df: pd.DataFrame) -> dict:
-    return {
-        "filas": len(df), "columnas": len(df.columns),
-        "variables": [{"nombre": str(c), "tipo": str(df[c].dtype),
-                       "faltantes": int(df[c].isna().sum())} for c in df.columns],
-    }
+    deadline = monotonic() + 45
+    with _session() as session:
+        for _ in range(4):
+            if monotonic() > deadline:
+                raise ValueError("La descarga tardó demasiado.")
+            if not official_url(url):
+                raise ValueError("El recurso requiere HTTPS en un dominio oficial permitido.")
+            with session.get(url, timeout=(4, 12), stream=True, allow_redirects=False) as response:
+                if response.is_redirect:
+                    url = urljoin(url, response.headers["Location"])
+                    continue
+                response.raise_for_status()
+                if response.status_code != 200:
+                    raise ValueError("El recurso no devolvió un fichero completo.")
+                data = bytearray()
+                for chunk in response.iter_content(chunk_size=65536):
+                    if monotonic() > deadline:
+                        raise ValueError("La descarga tardó demasiado.")
+                    data.extend(chunk)
+                    if len(data) > MAX_BYTES:
+                        raise ValueError("El fichero supera 15 MB.")
+                return read_table(bytes(data), str(resource.get("format", "")))
+    raise ValueError("Demasiadas redirecciones al cargar el recurso.")
