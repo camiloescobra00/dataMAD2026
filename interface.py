@@ -10,11 +10,11 @@ PAGES = {"Explorar": ":material/search:", "Mapa": ":material/map:",
          "Analizar": ":material/analytics:", "Catálogo": ":material/folder_open:"}
 PERSISTENT_FILTERS = (
     "facet_", "filter_", "values_", "keys_a_", "keys_b_", "join_right_",
-    "analysis_year_", "x_", "y_", "sel_", "studio_filter_", "studio_values_", "method_",
+    "analysis_year_", "x_", "y_", "sel_", "studio_filter_", "studio_values_", "method_", "dataset_map_",
 )
 PERSISTENT_KEYS = {
     "explorer_query", "catalog_sort", "analysis_tool", "analysis_table", "workspace_table",
-    "analysis_mode", "analysis_operation", "join_left", "join_method", "studio_dataset", "studio_view",
+    "analysis_mode", "analysis_operation", "join_left", "join_method", "studio_dataset", "studio_view", "map_dataset",
 }
 
 

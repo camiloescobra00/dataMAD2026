@@ -34,12 +34,12 @@ def test_search_and_http_failure(monkeypatch):
     monkeypatch.setattr(catalog, "_session", lambda: session)
     response = session.__enter__.return_value.get.return_value
     response.json.return_value = {"success": True, "result": {"count": 1, "results": [{}]}}
-    assert catalog.search_catalog(" paro ") == (1, [{}])
+    assert catalog.official_catalog_page(" paro ")["results"] == [{}]
     params = session.__enter__.return_value.get.call_args.kwargs["params"]
     assert params["q"] == "paro"
     response.raise_for_status.side_effect = HTTPError()
     with pytest.raises(HTTPError):
-        catalog.search_catalog("paro")
+        catalog.official_catalog_page("paro")
 
 
 def test_download_limits_and_redirect(monkeypatch):

@@ -18,13 +18,13 @@ from data_tables import (
     transform,
 )
 from dataset_cards import dataset_metadata, metadata_card
+from dataset_map_view import dataset_map
 from explore_view import full_map, question_screen
 from interface import navigation
-from joins import join_preview, key_role, normalized_name, suggest_keys
-from map_view import export_chart, linked_map
+from joins import join_preview, suggest_keys
+from map_view import export_chart
 from maps import municipal_map
 from settings import ai_settings
-from territories import normalize_code
 
 st.set_page_config(page_title="Madrid Data Explorer", page_icon="📊", layout="wide")
 st.session_state.setdefault("tables", {})
@@ -34,7 +34,7 @@ tables = st.session_state.tables
 
 
 @st.cache_data(ttl=600, max_entries=48, show_spinner=False)
-def search(query, start, filters, sort):
+def search_map_catalog(query, start, filters, sort):
     return catalog_page(query, start=start, filters=filters, sort=sort)
 
 
@@ -69,8 +69,20 @@ def downloads(df, metadata, name):
 
 
 def explorer():
-    st.header("Catálogo oficial")
-    st.write("Busca en el catálogo oficial de la Comunidad de Madrid o incorpora una tabla propia.")
+    from map_catalog import catalog_index
+
+    index = catalog_index()
+    st.header("Catálogo para mapas")
+    st.write("Solo datasets con indicadores municipales o ubicaciones que esta aplicación puede representar.")
+    st.caption(f"{index['count']} datasets seleccionados de {index['reviewed']} revisados · "
+               f"Metadatos: {index['snapshot_at'][:10]} · Verificación de muestras: {index['audited_at'][:10]}.")
+    with st.expander("Criterios de selección"):
+        st.write("Se comprobaron columnas y muestras oficiales: al menos dos municipios o ubicaciones distintas "
+                 "y un 80 % de ubicaciones reconocibles. Las tablas de indicadores requieren seleccionar periodo y categorías. "
+                 "Se excluyen totales regionales, tablas sin ubicación, encuestas sin tratamiento estadístico, "
+                 "geografías no soportadas y recursos no verificables. Se vuelve a comprobar la ubicación al descargar.")
+        st.caption("La selección es conservadora y se basa en muestras; no certifica todas las filas ni la vigencia de cada fuente.")
+    st.session_state.setdefault("search_params", ("", 0, {}, "Relevancia"))
     with st.form("buscar"):
         existing = st.session_state.get("search_params", ("", 0, {}, "Relevancia"))
         query = st.text_input("Tema o palabra clave", key="explorer_query", placeholder="Población, empleo, calidad del aire")
@@ -91,11 +103,14 @@ def explorer():
     if "search_params" in st.session_state:
         query, offset, filters, sort = st.session_state.search_params
         try:
-            with st.spinner("Consultando catálogo oficial…"):
-                result = search(query, offset, filters, sort)
+            with st.spinner("Buscando datasets aptos para mapas…"):
+                result = search_map_catalog(query, offset, filters, sort)
         except (requests.RequestException, ValueError, KeyError):
             st.error("El catálogo no respondió correctamente. Vuelve a buscar en unos instantes.")
         else:
+            if offset and offset >= result["count"]:
+                st.session_state.search_params = (query, 0, filters, sort)
+                st.rerun()
             st.session_state.facets = result.get("search_facets", {})
             st.caption(f"{result['count']:,} resultados · página {offset // 20 + 1}")
             a, b = st.columns(2)
@@ -114,6 +129,8 @@ def explorer():
                 resources = compatible_resources(ds)
                 with st.expander(title):
                     metadata_card(dataset_metadata(ds))
+                    for reason in dict.fromkeys(r["map_spec"]["reason"] for r in resources if r.get("map_spec")):
+                        st.info(reason)
                     if not resources:
                         st.info("No se encontraron formatos tabulares compatibles en los dominios admitidos.")
                     chosen = st.multiselect("Recursos", range(len(resources)), key=f"sel_{dataset_id}",
@@ -125,6 +142,7 @@ def explorer():
                         destination = None
                         for label, target in (("Explorar este dataset", "Estudio estadístico"),
                                               ("Analizar", "Estudio estadístico"),
+                                              ("Ver en mapa", "Mapa"),
                                               ("Combinar con otro dataset", "Preparar y combinar tablas")):
                             if actions.button(label, key=f"catalog_{label}_{dataset_id}"):
                                 destination = target
@@ -144,6 +162,10 @@ def explorer():
                                                              metadata=dataset_metadata(ds, resource))
                                     item = tables[existing_key]
                                 if destination:
+                                    if destination == "Mapa":
+                                        st.session_state.page = "Mapa"
+                                        st.session_state.map_dataset = existing_key
+                                        st.rerun()
                                     st.session_state.page = "Analizar"
                                     st.session_state.analysis_tool = destination
                                     st.session_state.studio_focus = existing_key
@@ -173,7 +195,7 @@ def explorer():
                                 raise ValueError("El recurso no contiene filas.")
                             store(f"{title} · {resource.get('name') or resource['format']}", df, [resource["url"]],
                                   metadata=dataset_metadata(ds, resource))
-                        st.success(f"{title} · {len(df):,} filas. Vista previa en Espacio de trabajo.")
+                        st.success(f"{title} · {len(df):,} filas. Disponible en Mapa → Dataset del mapa y en Analizar.")
                     except requests.RequestException:
                         st.error(f"{title}: recurso no disponible temporalmente o enlace inválido.")
                     except (ValueError, TypeError, KeyError, OSError, BadZipFile) as exc:
@@ -185,7 +207,7 @@ def explorer():
                 with st.spinner("Leyendo fichero…"):
                     df = read_table(file.getvalue(), file.name.rsplit(".", 1)[-1])
                     store(file.name, df, [f"Archivo de sesión: {file.name}"], metadata={"formato": file.name.rsplit(".", 1)[-1]})
-                st.success("Tabla importada. Puedes revisarla en Espacio de trabajo.")
+                st.success("Tabla importada. Selecciónala en Mapa → Dataset del mapa para crear su mapa.")
             except (ValueError, TypeError, KeyError, OSError, BadZipFile) as exc:
                 st.error(f"No se pudo interpretar el fichero: {exc}")
 
@@ -316,41 +338,10 @@ def map_panel(df, key):
                 st.error(str(exc))
 
 
-def suggest_municipal_map(df, key, sources):
-    for code in df.columns:
-        if key_role(code) != "Código municipal":
-            continue
-        system = "Almudena" if normalized_name(code) == "codigo_territorio" else "INE"
-        identifiers = df[code].map(lambda value, system=system: normalize_code(value, system) or normalize_code(value))
-        if not identifiers.notna().any():
-            continue
-        numeric = [name for name in df.select_dtypes(include="number")
-                   if name != code and key_role(name) not in {"Año", "Fecha", "Código municipal"}]
-        if not numeric:
-            return
-        with st.expander("Ver el indicador en el mapa de Madrid"):
-            if not st.checkbox("Mostrar mapa de la tabla", key=f"enable_territory_{key}"):
-                return
-            years = next((name for name in df if key_role(name) == "Año"), None)
-            view = df
-            if years:
-                available = sorted(df[years].dropna().unique(), reverse=True)
-                year = st.selectbox("Año", available, key=f"analysis_year_{key}")
-                view = df[df[years] == year]
-            metric = st.selectbox("Indicador", numeric, key=f"auto_metric_{key}")
-            frame = pd.DataFrame({"INE": identifiers.loc[view.index], "Valor": view[metric]})
-            if years:
-                history = pd.DataFrame({"INE": identifiers, "Año": df[years], "Valor": df[metric]})
-                if history.dropna(subset=["INE"]).duplicated(["INE", "Año"]).any():
-                    history = None
-                else:
-                    from territories import official_codes
-                    history["Municipio"] = history["INE"].map(lambda value: official_codes().get(value, ("", ""))[1])
-            else:
-                history = None
-            source = next((link for link in sources if link.startswith("https://")), None)
-            linked_map(frame, title=metric, unit="", key=f"advanced_{key}", history=history, source=source)
-        return
+def suggest_municipal_map(df, key, sources, spec=None):
+    with st.expander("Crear mapa de este dataset"):
+        if st.checkbox("Mostrar mapa de la tabla", key=f"enable_territory_{key}"):
+            dataset_map(df, f"analysis_{key}", sources, spec=spec)
 
 
 def analysis_screen():
@@ -374,7 +365,7 @@ def analysis_screen():
         if values:
             filters[filter_column] = values
             df = df[df[filter_column].isin(values)]
-    suggest_municipal_map(df, key, item["sources"])
+    suggest_municipal_map(df, key, item["sources"], spec=item.get("metadata", {}).get("map_spec"))
     map_panel(df, key)
     api_key, model, base_url = ai_settings(st.secrets)
     mode = st.radio("Modo", ["Manual", "Pregunta en lenguaje natural"], horizontal=True, key="analysis_mode")
@@ -435,7 +426,7 @@ page = navigation()
 if page == "Explorar":
     question_screen(store)
 elif page == "Mapa":
-    full_map()
+    full_map(tables)
 elif page == "Catálogo":
     explorer()
 else:

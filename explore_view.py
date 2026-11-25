@@ -5,7 +5,7 @@ import plotly.express as px
 import streamlit as st
 
 from analytics import analyze
-from catalog import compatible_resources, download_table
+from catalog import catalog_page, compatible_resources, download_table
 from data_tables import csv_export
 from dataset_cards import dataset_metadata
 from discovery import coverage, fold, interpret, mentions, retrieve
@@ -29,7 +29,7 @@ from territories import (
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def candidates(query):
-    return retrieve(query)
+    return retrieve(query, fetch=catalog_page)
 
 
 def municipality_mentions(question):
@@ -66,8 +66,28 @@ def official_reference(indicator, year):
     return values.iat[0] if not values.empty else None
 
 
-def full_map():
+def full_map(tables=None):
     st.header("Madrid, municipio a municipio")
+    tables = tables or {}
+    with st.container(border=True):
+        st.subheader("Mapas de tus datasets")
+        st.write("Crea mapas con municipios o coordenadas de los datasets del catálogo y de tus archivos.")
+        st.button("Crear mapa de otro dataset", icon=":material/add_location_alt:",
+                  key="map_open_catalog", on_click=navigate, args=("Catálogo",), type="primary")
+        if not tables:
+            st.info("Aún no hay datasets cargados en esta sesión. Abre el catálogo, selecciona un recurso "
+                    "y pulsa «Ver en mapa», o importa un archivo. Debajo puedes consultar los cinco indicadores verificados.")
+        if st.session_state.get("map_dataset") not in tables:
+            st.session_state.map_dataset = None
+        dataset = st.selectbox("Dataset del mapa", [None, *tables],
+                               format_func=lambda key: "Indicadores verificados" if key is None else f"{tables[key]['title']} · #{key}",
+                               key="map_dataset", disabled=not tables)
+    if dataset is not None:
+        from dataset_map_view import dataset_map
+
+        item = tables[dataset]
+        dataset_map(item["df"], f"page_{dataset}", item["sources"], spec=item.get("metadata", {}).get("map_spec"))
+        return
     st.write("Elige un indicador y pulsa un municipio para consultar su valor y compararlo.")
     source = remembered_choice(st.selectbox, "Indicador", list(INDICATORS), "map_indicator",
                                format_func=lambda value: INDICATORS[value][0])
