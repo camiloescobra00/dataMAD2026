@@ -29,12 +29,6 @@ def _session():
 
 
 def catalog_page(query, rows=20, start=0, filters=None, sort="Relevancia"):
-    from map_catalog import search_maps
-
-    return search_maps(query, rows, start, filters, sort)
-
-
-def official_catalog_page(query, rows=20, start=0, filters=None, sort="Relevancia"):
     clauses = []
     for label, value in (filters or {}).items():
         if value and label in FACETS:
@@ -99,10 +93,5 @@ def download_table(resource):
                     data.extend(chunk)
                     if len(data) > MAX_BYTES:
                         raise ValueError("El fichero supera 15 MB.")
-                frame = read_table(bytes(data), str(resource.get("format", "")))
-                if resource.get("map_spec"):
-                    from map_eligibility import validate_map_resource
-
-                    validate_map_resource(frame, resource["map_spec"])
-                return frame
+                return read_table(bytes(data), str(resource.get("format", "")))
     raise ValueError("Demasiadas redirecciones al cargar el recurso.")

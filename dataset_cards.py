@@ -29,7 +29,7 @@ def dataset_metadata(dataset, resource=None):
         "cobertura temporal": period, "cobertura geográfica": geography, "nivel territorial": territory,
         "formato": resource.get("format") or ", ".join(sorted({str(r["format"]) for r in dataset.get("resources", [])
                                                               if r.get("format")})),
-        "licencia": dataset.get("license_title"), "variables": definitions, "map_spec": resource.get("map_spec"),
+        "licencia": dataset.get("license_title"), "variables": definitions,
         "ficha": "https://datos.comunidad.madrid/dataset/" + quote(str(dataset.get("name") or dataset.get("id") or ""), safe=""),
     }
 
@@ -37,6 +37,6 @@ def dataset_metadata(dataset, resource=None):
 def metadata_card(metadata):
     st.text(metadata["descripción"])
     fields = [{"Metadato": key.capitalize(), "Información": str(value) if value else "Sin información publicada"}
-              for key, value in metadata.items() if key not in {"descripción", "variables", "ficha", "map_spec"}]
+              for key, value in metadata.items() if key not in {"descripción", "variables", "ficha"}]
     st.dataframe(pd.DataFrame(fields), hide_index=True)
     st.link_button("Ficha oficial", metadata["ficha"])
